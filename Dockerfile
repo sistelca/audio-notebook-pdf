@@ -16,5 +16,5 @@ COPY . .
 
 EXPOSE 8080
 
-# Punto de entrada desde el archivo wsgi.py de la raíz
-CMD ["python", "wsgi.py"]
+# Punto de entrada
+CMD ["gunicorn", "services.app:app", "-b", "0.0.0.0:8080"]

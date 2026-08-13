@@ -104,7 +104,6 @@ def ask_question():
     
     try:
         answer = qa_engine.ask_chapter(chapter_title, chapter_text, question)
-        print(answer)
         return jsonify({"answer": answer})
     except Exception as e:
         return jsonify({"error": f"Error al procesar la respuesta: {str(e)}"}), 500
