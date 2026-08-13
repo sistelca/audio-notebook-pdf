@@ -2,21 +2,34 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AudioNotebook PDF</title>
+    <title>AudioNotebook PDF - IA Estudio</title>
     <style>
         body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; background: #f4f4f9; }
-        #sidebar { width: 300px; background: #2c3e50; color: #ecf0f1; padding: 20px; overflow-y: auto; }
-        #content { flex: 1; padding: 40px; overflow-y: auto; display: flex; flex-direction: column; }
-        .chapter-item { padding: 10px; margin: 5px 0; background: #34495e; cursor: pointer; border-radius: 4px; }
+        #sidebar { width: 260px; background: #2c3e50; color: #ecf0f1; padding: 20px; overflow-y: auto; }
+        #content { flex: 1; padding: 30px; overflow-y: auto; display: flex; flex-direction: column; }
+        #qa-panel { width: 320px; background: #ffffff; border-left: 2px solid #e0e0e0; display: flex; flex-direction: column; padding: 20px; }
+        
+        .chapter-item { padding: 10px; margin: 5px 0; background: #34495e; cursor: pointer; border-radius: 4px; font-size: 14px; }
         .chapter-item.active { background: #1abc9c; }
+        
         .controls { position: sticky; top: 0; background: #fff; padding: 15px; border-bottom: 2px solid #ddd; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
         .paragraph { padding: 8px; margin-bottom: 8px; border-radius: 4px; line-height: 1.6; }
         .paragraph.reading { background-color: #ffeaa7; font-weight: bold; }
-        button { padding: 10px 15px; font-size: 14px; cursor: pointer; }
+        
+        /* Panel de Preguntas */
+        #chatBox { flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 15px; background: #fafafa; }
+        .chat-msg { margin-bottom: 12px; font-size: 14px; line-height: 1.4; }
+        .chat-msg.user { font-weight: bold; color: #2980b9; }
+        .chat-msg.ai { color: #2c3e50; background: #eef2f7; padding: 8px; border-radius: 6px; }
+        .chat-input-area { display: flex; gap: 5px; }
+        .chat-input-area input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 8px 12px; font-size: 14px; cursor: pointer; background: #1abc9c; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #16a085; }
     </style>
 </head>
 <body>
 
+    <!-- Panel Izquierdo: Libros y Capítulos -->
     <div id="sidebar">
         <h2>📚 Libros</h2>
         <select id="bookSelect" style="width: 100%; padding: 8px; margin-bottom: 20px;">
@@ -29,6 +42,7 @@
         <div id="chapterList"></div>
     </div>
 
+    <!-- Panel Central: Lectura en Voz Alta -->
     <div id="content">
         <div class="controls">
             <button id="btnPlay">▶️ Leer Capítulo</button>
@@ -41,13 +55,28 @@
         <div id="textContainer"></div>
     </div>
 
+    <!-- Panel Derecho: Preguntas y Respuestas IA -->
+    <div id="qa-panel">
+        <h3>💬 Consultas del Capítulo</h3>
+        <p style="font-size: 12px; color: #7f8c8d;">Hazle preguntas a Gemini sobre el texto que estás escuchando.</p>
+        
+        <div id="chatBox"></div>
+
+        <div class="chat-input-area">
+            <input type="text" id="questionInput" placeholder="Ej: ¿Cuál es la idea principal?" onkeypress="if(event.key==='Enter') askAI()">
+            <button onclick="askAI()">Enviar</button>
+        </div>
+        <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db;" onclick="speakAIAnswer()">🔊 Leer Respuesta de IA</button>
+    </div>
+
     <script>
         let currentParagraphs = [];
         let currentIndex = 0;
+        let activeChapterId = null;
+        let lastAiAnswer = "";
         let synth = window.speechSynthesis;
         let utterance = null;
 
-        // Cargar Voces
         function loadVoices() {
             let voices = synth.getVoices();
             let voiceSelect = document.getElementById('voiceSelect');
@@ -62,7 +91,6 @@
         }
         synth.onvoiceschanged = loadVoices;
 
-        // Cargar lista de capítulos al cambiar de libro
         document.getElementById('bookSelect').addEventListener('change', function() {
             loadChapters(this.value);
         });
@@ -85,7 +113,10 @@
         }
 
         function loadChapterContent(chapId) {
+            activeChapterId = chapId;
             synth.cancel();
+            document.getElementById('chatBox').innerHTML = ''; // Limpiar chat al cambiar capítulo
+
             fetch(`/chapter/${chapId}`)
                 .then(r => r.json())
                 .then(data => {
@@ -110,7 +141,6 @@
             synth.cancel();
             if (currentIndex >= currentParagraphs.length) return;
 
-            // Highlight visual del párrafo actual
             document.querySelectorAll('.paragraph').forEach(el => el.classList.remove('reading'));
             let currentEl = document.getElementById(`para-${currentIndex}`);
             if (currentEl) {
@@ -132,10 +162,51 @@
             synth.speak(utterance);
         }
 
+        // --- LÓGICA DE PREGUNTAS IA ---
+        function askAI() {
+            let input = document.getElementById('questionInput');
+            let q = input.value.trim();
+            if (!q || !activeChapterId) return;
+
+            let chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML += `<div class="chat-msg user"><b>Tú:</b> ${q}</div>`;
+            input.value = '';
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            chatBox.innerHTML += `<div class="chat-msg ai" id="loadingMsg"><i>Pensando con Gemini...</i></div>`;
+
+            fetch('/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chapter_id: activeChapterId, question: q })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('loadingMsg').remove();
+                if (data.answer) {
+                    lastAiAnswer = data.answer;
+                    chatBox.innerHTML += `<div class="chat-msg ai"><b>Gemini:</b> ${data.answer}</div>`;
+                } else {
+                    chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error: ${data.error}</div>`;
+                }
+                chatBox.scrollTop = chatBox.scrollHeight;
+            });
+        }
+
+        function speakAIAnswer() {
+            if (!lastAiAnswer) return;
+            synth.cancel();
+            let utt = new SpeechSynthesisUtterance(lastAiAnswer);
+            let voices = synth.getVoices();
+            let selectedVoice = document.getElementById('voiceSelect').value;
+            utt.voice = voices.find(v => v.name === selectedVoice);
+            utt.rate = parseFloat(document.getElementById('rate').value);
+            synth.speak(utt);
+        }
+
         document.getElementById('btnPlay').onclick = () => speakCurrent();
         document.getElementById('btnPause').onclick = () => synth.cancel();
 
-        // Cargar por primera vez
         let initialBook = document.getElementById('bookSelect').value;
         if (initialBook) loadChapters(initialBook);
     </script>

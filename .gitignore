@@ -9,6 +9,9 @@ __pycache__/
 # Base de datos local
 notebook.db
 
+# claves
+.env
+
 # PDFs de la carpeta storage (ignoramos los pdfs pero mantenemos la carpeta)
 storage/*.pdf
 !storage/.gitkeep
