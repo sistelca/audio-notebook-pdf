@@ -13,7 +13,8 @@
         .chapter-item.active { background: #1abc9c; }
         
         .controls { position: sticky; top: 0; background: #fff; padding: 15px; border-bottom: 2px solid #ddd; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
-        .paragraph { padding: 8px; margin-bottom: 8px; border-radius: 4px; line-height: 1.6; }
+        .paragraph { padding: 8px; margin-bottom: 8px; border-radius: 4px; line-height: 1.6; cursor: pointer; }
+        .paragraph:hover { background-color: #f0f0f0; }
         .paragraph.reading { background-color: #ffeaa7; font-weight: bold; }
         
         /* Panel de Preguntas */
@@ -67,7 +68,7 @@
             <button onclick="askAI()">Enviar</button>
         </div>
 
-        <!-- BOTÓN SIEMPRE VISIBLE Y ACTIVO -->
+        <!-- BOTÓN LEER RESPUESTA -->
         <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db; width: 100%; cursor: pointer;" onclick="speakAIAnswer()">
             🔊 Leer Respuesta de IA
         </button>
@@ -94,26 +95,57 @@
             });
         }
         synth.onvoiceschanged = loadVoices;
+        loadVoices();
 
+        // Detectar cambios en la selección del libro
         document.getElementById('bookSelect').addEventListener('change', function() {
             loadChapters(this.value);
         });
 
+        // Controles de lectura central
+        document.getElementById('btnPlay').onclick = () => {
+            if (synth.paused) {
+                synth.resume();
+            } else {
+                speakCurrent();
+            }
+        };
+
+        document.getElementById('btnPause').onclick = () => {
+            if (synth.speaking) synth.pause();
+        };
+
         function loadChapters(bookId) {
+            if (!bookId) return;
+
             fetch(`/book/${bookId}/chapters`)
                 .then(r => r.json())
                 .then(data => {
                     let list = document.getElementById('chapterList');
                     list.innerHTML = '';
+
+                    if (!data.chapters || data.chapters.length === 0) {
+                        list.innerHTML = '<p style="font-size:12px; color:#bdc3c7;">No se detectaron capítulos.</p>';
+                        return;
+                    }
+
                     data.chapters.forEach(c => {
                         let div = document.createElement('div');
                         div.className = `chapter-item ${c.id === data.current_chapter_id ? 'active' : ''}`;
                         div.textContent = `📖 [${c.number}] ${c.title}`;
-                        div.onclick = () => loadChapterContent(c.id);
+                        div.onclick = () => {
+                            document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('active'));
+                            div.classList.add('active');
+                            loadChapterContent(c.id);
+                        };
                         list.appendChild(div);
                     });
-                    if (data.current_chapter_id) loadChapterContent(data.current_chapter_id);
-                });
+
+                    // Cargar el capítulo activo o el primero automáticamente
+                    let targetId = data.current_chapter_id || (data.chapters[0] ? data.chapters[0].id : null);
+                    if (targetId) loadChapterContent(targetId);
+                })
+                .catch(err => console.error("Error al cargar capítulos:", err));
         }
 
         function loadChapterContent(chapId) {
@@ -138,7 +170,8 @@
                         p.onclick = () => { currentIndex = i; speakCurrent(); };
                         container.appendChild(p);
                     });
-                });
+                })
+                .catch(err => console.error("Error al cargar contenido:", err));
         }
 
         function speakCurrent() {
@@ -155,7 +188,9 @@
             utterance = new SpeechSynthesisUtterance(currentParagraphs[currentIndex]);
             let voices = synth.getVoices();
             let selectedVoice = document.getElementById('voiceSelect').value;
-            utterance.voice = voices.find(v => v.name === selectedVoice);
+            let matchedVoice = voices.find(v => v.name === selectedVoice);
+            if (matchedVoice) utterance.voice = matchedVoice;
+            
             utterance.rate = parseFloat(document.getElementById('rate').value);
 
             utterance.onend = () => {
@@ -175,7 +210,6 @@
             let chatBox = document.getElementById('chatBox');
             let btnRead = document.getElementById('btnReadAnswer');
 
-            // Cambiar estado visual mientras carga
             btnRead.innerText = "⏳ Generando respuesta...";
             
             chatBox.innerHTML += `<div class="chat-msg user"><b>Tú:</b> ${q}</div>`;
@@ -220,7 +254,6 @@
 
             synth.cancel();
 
-            // Limpieza adicional de seguridad en frontend
             let cleanText = lastAiAnswer
                 .replace(/[\*\_~`#]/g, '')
                 .replace(/\s+/g, ' ');
@@ -236,6 +269,14 @@
 
             synth.speak(utt);
         }
+
+        // --- CARGA INICIAL AUTOMÁTICA AL ABRIR LA PÁGINA ---
+        document.addEventListener('DOMContentLoaded', () => {
+            let bookSelect = document.getElementById('bookSelect');
+            if (bookSelect && bookSelect.value) {
+                loadChapters(bookSelect.value);
+            }
+        });
     </script>
 </body>
 </html>
