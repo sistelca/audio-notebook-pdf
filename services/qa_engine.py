@@ -1,15 +1,10 @@
-import os
 import re
-from google import genai
 from google.genai import types
 
 class ChapterQAEngine:
-    def __init__(self):
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
+    def __init__(self, client):
         
-        self.client = genai.Client(api_key=api_key)
+        self.client = client
 
     def _clean_markdown_for_speech(self, text):
         """Elimina completamente cualquier caracter o formato Markdown para síntesis de voz limpia."""

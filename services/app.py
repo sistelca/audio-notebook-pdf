@@ -4,9 +4,17 @@ from flask import Flask, render_template, jsonify, request
 from services.pdf_processor import PDFChapterExtractor
 from services.qa_engine import ChapterQAEngine
 import services.database as db
+from google import genai
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORAGE_FOLDER = os.path.join(BASE_DIR, 'storage')
+
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
+
+client = genai.Client(api_key=api_key)
 
 app = Flask(
     __name__,
@@ -20,7 +28,7 @@ db.init_db()
 # Inicializamos el motor de IA si la clave de API está configurada
 qa_engine = None
 try:
-    qa_engine = ChapterQAEngine()
+    qa_engine = ChapterQAEngine(client)
 except Exception as e:
     print(f"⚠️ Advertencia QA Engine: {e}")
 
