@@ -1,132 +1,118 @@
 import pymupdf
 import re
-import os
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
 # ------------------------------------------------------------------
-# 1. Esquema Pydantic para la respuesta de Gemini
+# 1. Esquema Pydantic para Gemini
 # ------------------------------------------------------------------
 class ElementoIndice(BaseModel):
-    nivel: str = Field(description="Tipo de jerarquía: 'parte', 'capitulo', 'seccion'")
-    numero: str = Field(description="Número identificador. Ej: '1', '2', '2.5'")
-    titulo: str = Field(description="Título limpio sin puntos guía ni número de página")
-    pagina_impresa: int = Field(description="Página listada en el índice impreso")
+    numero: str = Field(description="Identificador del capítulo/sección. Ej: '1', '2.5', 'Capítulo 3'")
+    titulo: str = Field(description="Título limpio de la sección")
 
 class EsqueletoLibro(BaseModel):
     estructura: list[ElementoIndice]
 
 
 # ------------------------------------------------------------------
-# 2. Clase Extractora con Delimitación Exacta de Texto
+# 2. Extractora Ultra Rápida por Marcadores (XX -> YX)
 # ------------------------------------------------------------------
 class PDFChapterExtractor:
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
         self.doc = pymupdf.open(pdf_path)
-
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
-        
-        self.client = genai.Client(api_key=api_key)
+        self.client = genai.Client()
 
     def get_chapters(self) -> list[dict]:
-        # Paso 1: Consultar a Gemini el índice impreso en las primeras páginas
+        # 1. Obtener los marcadores (números de capítulo) desde Gemini
         esqueleto = self._extraer_esqueleto_gemini()
         if not esqueleto or not esqueleto.estructura:
             return []
 
-        # Asumimos que los preliminares e índice están en las primeras 15 páginas
         PAGINAS_PRELIMINARES = min(15, len(self.doc))
 
-        # Paso 2: Crear el buffer de texto continuo (post-índice) y mapear caracteres a páginas
-        full_text = ""
-        char_to_page = []  # Lista donde char_to_page[i] me dice en qué página está el caracter i
-
-        for page_idx in range(PAGINAS_PRELIMINARES, len(self.doc)):
-            page_num = page_idx + 1
-            page_text = self.doc[page_idx].get_text("text")
-            
-            for char in page_text:
-                full_text += char
-                char_to_page.append(page_num)
-            
-            # Agregamos un salto de línea entre páginas
-            full_text += "\n"
-            char_to_page.append(page_num)
+        # 2. Concatenación instantánea del texto post-índice
+        # PyMuPDF extrae todo el libro en < 10ms usando join
+        full_text = "\n".join(
+            self.doc[p].get_text("text") for p in range(PAGINAS_PRELIMINARES, len(self.doc))
+        )
 
         if not full_text:
             return []
 
-        # Paso 3: Buscar las posiciones exactas de cada título de forma secuencial
-        titulos_posiciones = []
-        current_search_idx = 0
+        # 3. Encontrar las posiciones de corte (Búsqueda de XX -> YX)
+        posiciones = []
+        cursor_pos = 0
 
         for item in esqueleto.estructura:
-            titulo_clean = item.titulo.strip()
+            num = item.numero.strip()
+            if not num:
+                continue
+
+            # Construimos un patrón regex que busque el número al inicio de línea o rodeado de espacios
+            # Ejemplo: Busca "2.5" o "Capítulo 2.5"
+            pattern = r'(?:^|\n|\s+)' + re.escape(num) + r'(?:\s+|\.|$)'
             
-            # Búsqueda flexible usando Regex para tolerar saltos de línea o múltiples espacios en el título
-            pattern = re.escape(titulo_clean).replace(r'\ ', r'\s+')
-            match = re.search(pattern, full_text[current_search_idx:], re.IGNORECASE)
+            match = re.search(pattern, full_text[cursor_pos:], re.IGNORECASE)
 
             if match:
-                # Posición absoluta dentro del full_text
-                abs_start_idx = current_search_idx + match.start()
-                page_start = char_to_page[min(abs_start_idx, len(char_to_page) - 1)]
-
-                titulos_posiciones.append({
-                    "numero": item.numero if item.numero else "",
+                start_idx = cursor_pos + match.start()
+                posiciones.append({
+                    "numero": num,
                     "titulo": item.titulo,
-                    "start_idx": abs_start_idx,
-                    "start_page": page_start
+                    "start_idx": start_idx
                 })
-                # El siguiente título DEBE buscarse a partir de donde comenzó este
-                current_search_idx = abs_start_idx + len(match.group(0))
+                # Avanzamos el cursor para buscar el SIGUIENTE capítulo estrictamente después de este
+                cursor_pos = start_idx + len(match.group(0))
 
-        # Paso 4: Recortar el texto EXACTO de título a título
+        # 4. Generar la estructura con recortes exactos XX -> YX
         resultado = []
-        total_titulos = len(titulos_posiciones)
+        total = len(posiciones)
 
-        for i, item in enumerate(titulos_posiciones):
-            start_idx = item["start_idx"]
-            start_page = item["start_page"]
+        for i, pos in enumerate(posiciones):
+            start = pos["start_idx"]
+            # Si hay un siguiente capítulo (YX), el corte termina justo allí. Si no, llega al final del texto.
+            end = posiciones[i + 1]["start_idx"] if (i + 1 < total) else len(full_text)
 
-            if i + 1 < total_titulos:
-                end_idx = titulos_posiciones[i + 1]["start_idx"]
-                end_page = titulos_posiciones[i + 1]["start_page"]
-            else:
-                end_idx = len(full_text)
-                end_page = char_to_page[-1] if char_to_page else len(self.doc)
-
-            # Extraemos el texto exacto desde el inicio del título actual hasta justo antes del siguiente
-            content_exacto = full_text[start_idx:end_idx].strip()
+            # Estimación rápida de páginas físicas para la interfaz
+            start_page = PAGINAS_PRELIMINARES + full_text[:start].count('\n\n') // 20 + 1
+            end_page = PAGINAS_PRELIMINARES + full_text[:end].count('\n\n') // 20 + 1
 
             resultado.append({
-                "chapter_number": item["numero"],
-                "title": item["titulo"],
-                "start_page": start_page,
-                "end_page": end_page,
-                "content": content_exacto
+                "chapter_number": pos["numero"],
+                "title": pos["titulo"],
+                "start_page": max(1, start_page),
+                "end_page": max(start_page, end_page),
+                "start_idx": start,
+                "end_idx": end,
+                "content": ""  # Mantenemos ligero el objeto inicial
             })
 
         return resultado
 
+    def get_chapter_content_by_pos(self, start_idx: int, end_idx: int) -> str:
+        """
+        Extrae el contenido exacto [XX : YX] de forma instantánea al hacer clic
+        """
+        PAGINAS_PRELIMINARES = min(15, len(self.doc))
+        full_text = "\n".join(
+            self.doc[p].get_text("text") for p in range(PAGINAS_PRELIMINARES, len(self.doc))
+        )
+        return full_text[start_idx:end_idx].strip()
+
     def _extraer_esqueleto_gemini(self) -> EsqueletoLibro:
-        """Extrae el texto de los preliminares y obtiene la estructura JSON con Gemini"""
+        """Obtiene la lista ordenada de marcadores/capítulos desde los preliminares"""
         texto_preliminares = ""
         paginas_analizar = min(15, len(self.doc))
-        
         for i in range(paginas_analizar):
-            texto_preliminares += f"\n--- PÁGINA FÍSICA {i + 1} ---\n"
-            texto_preliminares += self.doc[i].get_text("text")
+            texto_preliminares += f"\n--- PÁGINA {i + 1} ---\n" + self.doc[i].get_text("text")
 
         prompt = f"""
-        Analiza el texto de los preliminares de este libro y extrae la Tabla de Contenido / Índice.
-        Extrae únicamente las entradas correspondientes a Partes, Capítulos o Secciones principales.
+        Analiza el texto de los preliminares de este libro y extrae el Índice / Tabla de Contenido.
+        Extrae el identificador/número exacto del capítulo (ejemplo: '1', '2.5', '3.1.2') y su título.
 
-        Texto:
+        Texto preliminar:
         {texto_preliminares}
         """
 
@@ -142,5 +128,6 @@ class PDFChapterExtractor:
             )
             return response.parsed
         except Exception as e:
-            print(f"❌ Error consultando Gemini para índice: {e}")
+            print(f"❌ Error en Gemini: {e}")
             return EsqueletoLibro(estructura=[])
+        
