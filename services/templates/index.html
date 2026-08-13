@@ -66,7 +66,11 @@
             <input type="text" id="questionInput" placeholder="Ej: ¿Cuál es la idea principal?" onkeypress="if(event.key==='Enter') askAI()">
             <button onclick="askAI()">Enviar</button>
         </div>
-        <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db;" onclick="speakAIAnswer()" disabled>🔊 Leer Respuesta de IA</button>
+
+        <!-- BOTÓN SIEMPRE VISIBLE Y ACTIVO -->
+        <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db; width: 100%; cursor: pointer;" onclick="speakAIAnswer()">
+            🔊 Leer Respuesta de IA
+        </button>
     </div>
 
     <script>
@@ -171,10 +175,9 @@
             let chatBox = document.getElementById('chatBox');
             let btnRead = document.getElementById('btnReadAnswer');
 
-            // Deshabilitar botón de lectura mientras Gemini responde
-            btnRead.disabled = true;
-            btnRead.style.opacity = '0.5';
-
+            // Cambiar estado visual mientras carga
+            btnRead.innerText = "⏳ Generando respuesta...";
+            
             chatBox.innerHTML += `<div class="chat-msg user"><b>Tú:</b> ${q}</div>`;
             input.value = '';
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -194,48 +197,47 @@
                 if (data.answer) {
                     lastAiAnswer = data.answer;
                     chatBox.innerHTML += `<div class="chat-msg ai"><b>Gemini:</b> ${data.answer}</div>`;
-                    
-                    // Habilitar el botón de lectura de voz
-                    btnRead.disabled = false;
-                    btnRead.style.opacity = '1';
                 } else {
                     chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error: ${data.error}</div>`;
                 }
+                
+                btnRead.innerText = "🔊 Leer Respuesta de IA";
                 chatBox.scrollTop = chatBox.scrollHeight;
             })
             .catch(err => {
                 let loadingMsg = document.getElementById('loadingMsg');
                 if (loadingMsg) loadingMsg.remove();
-                chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error de conexión con el servidor.</div>`;
+                chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error de conexión.</div>`;
+                btnRead.innerText = "🔊 Leer Respuesta de IA";
             });
         }
 
         function speakAIAnswer() {
-            if (!lastAiAnswer) return;
+            if (!lastAiAnswer) {
+                alert("Aún no hay una respuesta de la IA para leer.");
+                return;
+            }
+
             synth.cancel();
 
-            // Limpieza de seguridad: elimina markdown o caracteres extraños si sobrevivieron
+            // Limpieza de símbolos por si acaso
             let cleanText = lastAiAnswer
-                .replace(/[\*\_~`#]/g, '')            // Elimina *, _, ~, `, #
-                .replace(/\|/g, ', ')                 // Reemplaza barras de tablas por comas
-                .replace(/<[^>]*>/g, '')              // Elimina etiquetas HTML si las hubiera
-                .replace(/\n+/g, '. ');              // Convierte saltos de línea en pausas/puntos
+                .replace(/[\*\_~`#]/g, '')
+                .replace(/\|/g, ', ')
+                .replace(/<[^>]*>/g, '')
+                .replace(/\n+/g, '. ');
 
             let utt = new SpeechSynthesisUtterance(cleanText);
             let voices = synth.getVoices();
             let selectedVoice = document.getElementById('voiceSelect').value;
             
-            utt.voice = voices.find(v => v.name === selectedVoice);
+            let matchedVoice = voices.find(v => v.name === selectedVoice);
+            if (matchedVoice) utt.voice = matchedVoice;
+            
             utt.rate = parseFloat(document.getElementById('rate').value);
 
             synth.speak(utt);
         }
-
-        document.getElementById('btnPlay').onclick = () => speakCurrent();
-        document.getElementById('btnPause').onclick = () => synth.cancel();
-
-        let initialBook = document.getElementById('bookSelect').value;
-        if (initialBook) loadChapters(initialBook);
     </script>
 </body>
 </html>
