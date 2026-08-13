@@ -66,7 +66,7 @@
             <input type="text" id="questionInput" placeholder="Ej: ¿Cuál es la idea principal?" onkeypress="if(event.key==='Enter') askAI()">
             <button onclick="askAI()">Enviar</button>
         </div>
-        <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db;" onclick="speakAIAnswer()">🔊 Leer Respuesta de IA</button>
+        <button id="btnReadAnswer" style="margin-top: 10px; background: #3498db;" onclick="speakAIAnswer()" disabled>🔊 Leer Respuesta de IA</button>
     </div>
 
     <script>
@@ -169,6 +169,12 @@
             if (!q || !activeChapterId) return;
 
             let chatBox = document.getElementById('chatBox');
+            let btnRead = document.getElementById('btnReadAnswer');
+
+            // Deshabilitar botón de lectura mientras Gemini responde
+            btnRead.disabled = true;
+            btnRead.style.opacity = '0.5';
+
             chatBox.innerHTML += `<div class="chat-msg user"><b>Tú:</b> ${q}</div>`;
             input.value = '';
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -182,14 +188,25 @@
             })
             .then(r => r.json())
             .then(data => {
-                document.getElementById('loadingMsg').remove();
+                let loadingMsg = document.getElementById('loadingMsg');
+                if (loadingMsg) loadingMsg.remove();
+
                 if (data.answer) {
                     lastAiAnswer = data.answer;
                     chatBox.innerHTML += `<div class="chat-msg ai"><b>Gemini:</b> ${data.answer}</div>`;
+                    
+                    // Habilitar el botón de lectura de voz
+                    btnRead.disabled = false;
+                    btnRead.style.opacity = '1';
                 } else {
                     chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error: ${data.error}</div>`;
                 }
                 chatBox.scrollTop = chatBox.scrollHeight;
+            })
+            .catch(err => {
+                let loadingMsg = document.getElementById('loadingMsg');
+                if (loadingMsg) loadingMsg.remove();
+                chatBox.innerHTML += `<div class="chat-msg ai" style="color:red;">Error de conexión con el servidor.</div>`;
             });
         }
 
