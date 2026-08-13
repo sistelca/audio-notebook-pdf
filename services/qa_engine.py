@@ -1,43 +1,65 @@
 import os
+import re
 from google import genai
 from google.genai import types
 
 class ChapterQAEngine:
     def __init__(self):
-        # Toma la clave de API desde las variables de entorno de Docker
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
         
         self.client = genai.Client(api_key=api_key)
 
+    def _clean_markdown_for_speech(self, text):
+        """Elimina completamente cualquier caracter o formato Markdown para síntesis de voz limpia."""
+        if not text:
+            return ""
+
+        # 1. Eliminar encabezados tipo #, ##, ###
+        text = re.sub(r'#+\s*', '', text)
+        
+        # 2. Eliminar negritas y cursivas (**texto**, *texto*, __texto__, _texto_)
+        text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+        text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
+        
+        # 3. Eliminar viñetas de listas (* item, - item, + item)
+        text = re.sub(r'^\s*[\*\-\+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\n\s*[\*\-\+]\s+', '\n', text)
+
+        # 4. Convertir listas numeradas (1. Item) en oraciones fluidas
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+        # 5. Eliminar tildes invertidas / bloques de código (`código`)
+        text = re.sub(r'`{1,3}(.*?)`{1,3}', r'\1', text)
+
+        # 6. Eliminar barras de tablas o caracteres de formato
+        text = text.replace('|', ', ')
+
+        # 7. Normalizar espacios múltiples y saltos de línea
+        text = re.sub(r'\n+', '. ', text)
+        text = re.sub(r'\s+', ' ', text)
+
+        return text.strip()
+
     def ask_chapter(self, chapter_title, chapter_text, question):
-        """Envía el texto del capítulo activo como contexto exclusivo al modelo Gemini."""
+        """Envía la pregunta a Gemini y retorna un texto adaptado para voz."""
         system_instruction = (
-            "Eres un tutor académico y asistente de estudio en formato de voz. "
-            "Tu objetivo es responder a las preguntas del usuario utilizando EXCLUSIVAMENTE "
-            "la información del capítulo proporcionado.\n\n"
-            "REGLAS CRÍTICAS DE FORMATO PARA LECTURA POR VOZ (TEXT-TO-SPEECH):\n"
-            "1. NO utilices ningun tipo de formato Markdown: NO uses asteriscos (*), almohadillas (#), "
-            "negritas (**), cursivas, ni guiones de lista.\n"
-            "2. NO uses tablas ni esquemas visuales. Traduce cualquier comparación o lista a párrafos "
-            "narrativos continuos y bien estructurados.\n"
-            "3. NO agregues saludos ni muletillas de cortesía (evita frases como '¡Claro!', 'Con gusto', 'A continuación te presento'). "
-            "Comienza directamente con la respuesta.\n"
-            "4. Utiliza únicamente texto plano. Separa las ideas principales con puntos seguidos o saltos de párrafo simples.\n"
-            "5. Redacta con un lenguaje natural, continuo y conversacional, usando conectores gramaticales "
-            "(como 'en primer lugar', 'por otro lado', 'en segundo lugar', 'en conclusión') para que la síntesis de voz "
-            "suene fluida, pausada y agradable de escuchar."
+            "Eres un tutor académico en formato de audio. "
+            "Responde a la pregunta usando EXCLUSIVAMENTE el contenido del capítulo proporcionado. "
+            "Redacta en un tono didáctico, fluido y continuo, utilizando conectores del lenguaje "
+            "(como 'en primer lugar', 'por otra parte', 'en conclusión'). "
+            "No uses listas, no uses saludos de cortesía ni símbolos de formato."
         )
 
         prompt = f"""
-                    Capítulo: {chapter_title}
+                Capítulo: {chapter_title}
 
-                    Contenido del capítulo:
-                    {chapter_text}
+                Contenido:
+                {chapter_text}
 
-                    Pregunta del estudiante:
-                    {question}
+                Pregunta:
+                {question}
                 """
 
         response = self.client.models.generate_content(
@@ -45,9 +67,10 @@ class ChapterQAEngine:
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.2, # Broma/Creatividad baja para máxima fidelidad al texto
+                temperature=0.2,
             ),
         )
 
-        return response.text
+        # Aplicar la limpieza estricta en el servidor
+        return self._clean_markdown_for_speech(response.text)
     

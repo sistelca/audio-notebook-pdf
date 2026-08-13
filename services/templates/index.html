@@ -220,14 +220,10 @@
 
             synth.cancel();
 
-            // Limpieza de símbolos por si acaso
+            // Limpieza adicional de seguridad en frontend
             let cleanText = lastAiAnswer
                 .replace(/[\*\_~`#]/g, '')
-                .replace(/\|/g, ', ')
-                .replace(/<[^>]*>/g, '')
-                .replace(/\n+/g, '. ');
-
-            console.log('cleanText: ', cleanText);
+                .replace(/\s+/g, ' ');
 
             let utt = new SpeechSynthesisUtterance(cleanText);
             let voices = synth.getVoices();
