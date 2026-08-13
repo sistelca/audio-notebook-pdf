@@ -1,4 +1,6 @@
 import pymupdf
+import re
+from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
@@ -16,61 +18,97 @@ class EsqueletoLibro(BaseModel):
 
 
 # ------------------------------------------------------------------
-# 2. Clase Extractora Refactorizada con Gemini + PyMuPDF
+# 2. Clase Extractora con Delimitación Exacta de Texto
 # ------------------------------------------------------------------
 class PDFChapterExtractor:
-    def __init__(self, pdf_path: str, client):
+    def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
         self.doc = pymupdf.open(pdf_path)
-        # Inicializa cliente de Gemini usando GEMINI_API_KEY del entorno
-        self.client = client
+        self.client = genai.Client()
 
     def get_chapters(self) -> list[dict]:
-        """
-        Extrae la estructura usando Gemini, calcula rangos de páginas reales 
-        y extrae el contenido de cada capítulo para la BD.
-        """
         # Paso 1: Consultar a Gemini el índice impreso en las primeras páginas
         esqueleto = self._extraer_esqueleto_gemini()
         if not esqueleto or not esqueleto.estructura:
             return []
 
-        # Paso 2: Filtrar solo capítulos/partes principales y buscar sus páginas físicas
-        capitulos_mapeados = self._mapear_paginas_fisicas(esqueleto)
-        
-        # Paso 3: Calcular rangos (start_page, end_page) y extraer el texto
-        resultado = []
-        total_caps = len(capitulos_mapeados)
+        # Asumimos que los preliminares e índice están en las primeras 15 páginas
+        PAGINAS_PRELIMINARES = min(15, len(self.doc))
 
-        for i, cap in enumerate(capitulos_mapeados):
-            start_page = cap["pagina_fisica_real"]
+        # Paso 2: Crear el buffer de texto continuo (post-índice) y mapear caracteres a páginas
+        full_text = ""
+        char_to_page = []  # Lista donde char_to_page[i] me dice en qué página está el caracter i
+
+        for page_idx in range(PAGINAS_PRELIMINARES, len(self.doc)):
+            page_num = page_idx + 1
+            page_text = self.doc[page_idx].get_text("text")
             
-            # La página final es la página inicial del siguiente capítulo menos 1, 
-            # o la última página del documento si es el último capítulo.
-            if i + 1 < total_caps:
-                end_page = capitulos_mapeados[i + 1]["pagina_fisica_real"] - 1
+            for char in page_text:
+                full_text += char
+                char_to_page.append(page_num)
+            
+            # Agregamos un salto de línea entre páginas
+            full_text += "\n"
+            char_to_page.append(page_num)
+
+        if not full_text:
+            return []
+
+        # Paso 3: Buscar las posiciones exactas de cada título de forma secuencial
+        titulos_posiciones = []
+        current_search_idx = 0
+
+        for item in esqueleto.estructura:
+            titulo_clean = item.titulo.strip()
+            
+            # Búsqueda flexible usando Regex para tolerar saltos de línea o múltiples espacios en el título
+            pattern = re.escape(titulo_clean).replace(r'\ ', r'\s+')
+            match = re.search(pattern, full_text[current_search_idx:], re.IGNORECASE)
+
+            if match:
+                # Posición absoluta dentro del full_text
+                abs_start_idx = current_search_idx + match.start()
+                page_start = char_to_page[min(abs_start_idx, len(char_to_page) - 1)]
+
+                titulos_posiciones.append({
+                    "numero": item.numero if item.numero else "",
+                    "titulo": item.titulo,
+                    "start_idx": abs_start_idx,
+                    "start_page": page_start
+                })
+                # El siguiente título DEBE buscarse a partir de donde comenzó este
+                current_search_idx = abs_start_idx + len(match.group(0))
+
+        # Paso 4: Recortar el texto EXACTO de título a título
+        resultado = []
+        total_titulos = len(titulos_posiciones)
+
+        for i, item in enumerate(titulos_posiciones):
+            start_idx = item["start_idx"]
+            start_page = item["start_page"]
+
+            if i + 1 < total_titulos:
+                end_idx = titulos_posiciones[i + 1]["start_idx"]
+                end_page = titulos_posiciones[i + 1]["start_page"]
             else:
-                end_page = len(self.doc)
+                end_idx = len(full_text)
+                end_page = char_to_page[-1] if char_to_page else len(self.doc)
 
-            # Asegurar rangos válidos
-            if end_page < start_page:
-                end_page = start_page
-
-            # Extraer el texto completo de este rango de páginas
-            content = self._extraer_texto_rango(start_page, end_page)
+            # Extraemos el texto exacto desde el inicio del título actual hasta justo antes del siguiente
+            content_exacto = full_text[start_idx:end_idx].strip()
 
             resultado.append({
-                "chapter_number": cap["numero"],
-                "title": cap["titulo"],
+                "chapter_number": item["numero"],
+                "title": item["titulo"],
                 "start_page": start_page,
                 "end_page": end_page,
-                "content": content
+                "content": content_exacto
             })
 
         return resultado
 
     def _extraer_esqueleto_gemini(self) -> EsqueletoLibro:
-        """Extrae el texto preliminar y le pide el índice estructurado a Gemini"""
+        """Extrae el texto de los preliminares y obtiene la estructura JSON con Gemini"""
         texto_preliminares = ""
         paginas_analizar = min(15, len(self.doc))
         
@@ -100,40 +138,3 @@ class PDFChapterExtractor:
         except Exception as e:
             print(f"❌ Error consultando Gemini para índice: {e}")
             return EsqueletoLibro(estructura=[])
-
-    def _mapear_paginas_fisicas(self, esqueleto: EsqueletoLibro) -> list[dict]:
-        """Usa PyMuPDF para encontrar en qué página física real comienza cada capítulo"""
-        capitulos = []
-        idx = 1
-
-        for item in esqueleto.estructura:
-            titulo_clean = item.titulo.lower().strip()
-            pagina_fisica = None
-
-            # Buscar la primera coincidencia del título en todo el documento
-            for page_index in range(len(self.doc)):
-                texto_pag = self.doc[page_index].get_text("text").lower()
-                if titulo_clean in texto_pag:
-                    pagina_fisica = page_index + 1  # Base 1
-                    break
-
-            # Si se encontró la página, lo agregamos como capítulo válido
-            if pagina_fisica:
-                num_cap = item.numero if item.numero else str(idx)
-                capitulos.append({
-                    "numero": num_cap,
-                    "titulo": item.titulo,
-                    "pagina_fisica_real": pagina_fisica
-                })
-                idx += 1
-
-        return capitulos
-
-    def _extraer_texto_rango(self, start_page: int, end_page: int) -> str:
-        """Extrae todo el texto comprendido entre dos páginas (base 1)"""
-        texto = ""
-        for p in range(start_page - 1, end_page):
-            if p < len(self.doc):
-                texto += self.doc[p].get_text("text") + "\n\n"
-        return texto.strip()
-    
