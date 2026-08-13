@@ -1,5 +1,6 @@
 import pymupdf
 import re
+import os
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -21,10 +22,15 @@ class EsqueletoLibro(BaseModel):
 # 2. Clase Extractora con Delimitación Exacta de Texto
 # ------------------------------------------------------------------
 class PDFChapterExtractor:
-    def __init__(self, pdf_path: str, client):
+    def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
         self.doc = pymupdf.open(pdf_path)
-        self.client = client
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
+        
+        self.client = genai.Client(api_key=api_key)
 
     def get_chapters(self) -> list[dict]:
         # Paso 1: Consultar a Gemini el índice impreso en las primeras páginas

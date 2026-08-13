@@ -4,17 +4,10 @@ from flask import Flask, render_template, jsonify, request
 from services.pdf_processor import PDFChapterExtractor
 from services.qa_engine import ChapterQAEngine
 import services.database as db
-from google import genai
-
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORAGE_FOLDER = os.path.join(BASE_DIR, 'storage')
 
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("GEMINI_API_KEY no está configurada en las variables de entorno.")
-
-client = genai.Client(api_key=api_key)
 
 app = Flask(
     __name__,
@@ -28,22 +21,30 @@ db.init_db()
 # Inicializamos el motor de IA si la clave de API está configurada
 qa_engine = None
 try:
-    qa_engine = ChapterQAEngine(client)
+    qa_engine = ChapterQAEngine()
 except Exception as e:
     print(f"⚠️ Advertencia QA Engine: {e}")
 
 @app.route('/')
 def index():
     pdf_files = [f for f in os.listdir(STORAGE_FOLDER) if f.endswith('.pdf')]
-    for pdf in pdf_files:
-        path = os.path.join(STORAGE_FOLDER, pdf)
-        extractor = PDFChapterExtractor(path, client)
-        capitulos = extractor.get_chapters()
-        if capitulos:
-            db.save_book_and_chapters(pdf, capitulos)
-
+    
     conn = sqlite3.connect(db.DB_NAME)
     cursor = conn.cursor()
+
+    for pdf in pdf_files:
+        # 1. Verificar si el libro ya está guardado en la BD
+        cursor.execute("SELECT id FROM books WHERE title = ?", (pdf,))
+        existing_book = cursor.fetchone()
+
+        # 2. Solo llamar a Gemini si el PDF es totalmente nuevo
+        if not existing_book:
+            path = os.path.join(STORAGE_FOLDER, pdf)
+            extractor = PDFChapterExtractor(path)
+            capitulos = extractor.get_chapters()
+            if capitulos:
+                db.save_book_and_chapters(pdf, capitulos)
+
     cursor.execute("SELECT id, title FROM books")
     books = cursor.fetchall()
     conn.close()
