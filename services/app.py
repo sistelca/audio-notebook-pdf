@@ -37,7 +37,7 @@ def index():
     pdf_files = [f for f in os.listdir(STORAGE_FOLDER) if f.endswith('.pdf')]
     for pdf in pdf_files:
         path = os.path.join(STORAGE_FOLDER, pdf)
-        extractor = PDFChapterExtractor(path)
+        extractor = PDFChapterExtractor(path, client)
         capitulos = extractor.get_chapters()
         if capitulos:
             db.save_book_and_chapters(pdf, capitulos)

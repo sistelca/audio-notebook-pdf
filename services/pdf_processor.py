@@ -21,10 +21,10 @@ class EsqueletoLibro(BaseModel):
 # 2. Clase Extractora con Delimitación Exacta de Texto
 # ------------------------------------------------------------------
 class PDFChapterExtractor:
-    def __init__(self, pdf_path: str):
+    def __init__(self, pdf_path: str, client):
         self.pdf_path = pdf_path
         self.doc = pymupdf.open(pdf_path)
-        self.client = genai.Client()
+        self.client = client
 
     def get_chapters(self) -> list[dict]:
         # Paso 1: Consultar a Gemini el índice impreso en las primeras páginas
