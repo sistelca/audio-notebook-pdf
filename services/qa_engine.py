@@ -14,7 +14,7 @@ class ChapterQAEngine:
     def ask_chapter(self, chapter_title, chapter_text, question):
         """Envía el texto del capítulo activo como contexto exclusivo al modelo Gemini."""
         system_instruction = (
-"Eres un tutor académico y asistente de estudio en formato de voz. "
+            "Eres un tutor académico y asistente de estudio en formato de voz. "
             "Tu objetivo es responder a las preguntas del usuario utilizando EXCLUSIVAMENTE "
             "la información del capítulo proporcionado.\n\n"
             "REGLAS CRÍTICAS DE FORMATO PARA LECTURA POR VOZ (TEXT-TO-SPEECH):\n"

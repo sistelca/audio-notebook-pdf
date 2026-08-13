@@ -227,6 +227,8 @@
                 .replace(/<[^>]*>/g, '')
                 .replace(/\n+/g, '. ');
 
+            console.log('cleanText: ', cleanText);
+
             let utt = new SpeechSynthesisUtterance(cleanText);
             let voices = synth.getVoices();
             let selectedVoice = document.getElementById('voiceSelect').value;
