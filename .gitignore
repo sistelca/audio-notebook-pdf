@@ -1,0 +1,17 @@
+# Entorno virtual
+venv/
+env/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Base de datos local
+notebook.db
+
+# PDFs de la carpeta storage (ignoramos los pdfs pero mantenemos la carpeta)
+storage/*.pdf
+!storage/.gitkeep
+
+# Ajustes de VS Code
+.vscode/

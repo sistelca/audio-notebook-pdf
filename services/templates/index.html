@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>AudioNotebook PDF</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; background: #f4f4f9; }
+        #sidebar { width: 300px; background: #2c3e50; color: #ecf0f1; padding: 20px; overflow-y: auto; }
+        #content { flex: 1; padding: 40px; overflow-y: auto; display: flex; flex-direction: column; }
+        .chapter-item { padding: 10px; margin: 5px 0; background: #34495e; cursor: pointer; border-radius: 4px; }
+        .chapter-item.active { background: #1abc9c; }
+        .controls { position: sticky; top: 0; background: #fff; padding: 15px; border-bottom: 2px solid #ddd; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        .paragraph { padding: 8px; margin-bottom: 8px; border-radius: 4px; line-height: 1.6; }
+        .paragraph.reading { background-color: #ffeaa7; font-weight: bold; }
+        button { padding: 10px 15px; font-size: 14px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>📚 Libros</h2>
+        <select id="bookSelect" style="width: 100%; padding: 8px; margin-bottom: 20px;">
+            {% for b in books %}
+                <option value="{{ b[0] }}">{{ b[1] }}</option>
+            {% endfor %}
+        </select>
+        
+        <h3>Capítulos</h3>
+        <div id="chapterList"></div>
+    </div>
+
+    <div id="content">
+        <div class="controls">
+            <button id="btnPlay">▶️ Leer Capítulo</button>
+            <button id="btnPause">⏸️ Pausar</button>
+            <label>Voz: <select id="voiceSelect"></select></label>
+            <label>Velocidad: <input type="range" id="rate" min="0.5" max="2" value="1" step="0.1"></label>
+        </div>
+
+        <h1 id="chapterTitle">Selecciona un libro para comenzar</h1>
+        <div id="textContainer"></div>
+    </div>
+
+    <script>
+        let currentParagraphs = [];
+        let currentIndex = 0;
+        let synth = window.speechSynthesis;
+        let utterance = null;
+
+        // Cargar Voces
+        function loadVoices() {
+            let voices = synth.getVoices();
+            let voiceSelect = document.getElementById('voiceSelect');
+            voiceSelect.innerHTML = '';
+            voices.forEach(v => {
+                let opt = document.createElement('option');
+                opt.value = v.name;
+                opt.textContent = `${v.name} (${v.lang})`;
+                if (v.lang.includes('es')) opt.selected = true;
+                voiceSelect.appendChild(opt);
+            });
+        }
+        synth.onvoiceschanged = loadVoices;
+
+        // Cargar lista de capítulos al cambiar de libro
+        document.getElementById('bookSelect').addEventListener('change', function() {
+            loadChapters(this.value);
+        });
+
+        function loadChapters(bookId) {
+            fetch(`/book/${bookId}/chapters`)
+                .then(r => r.json())
+                .then(data => {
+                    let list = document.getElementById('chapterList');
+                    list.innerHTML = '';
+                    data.chapters.forEach(c => {
+                        let div = document.createElement('div');
+                        div.className = `chapter-item ${c.id === data.current_chapter_id ? 'active' : ''}`;
+                        div.textContent = `📖 [${c.number}] ${c.title}`;
+                        div.onclick = () => loadChapterContent(c.id);
+                        list.appendChild(div);
+                    });
+                    if (data.current_chapter_id) loadChapterContent(data.current_chapter_id);
+                });
+        }
+
+        function loadChapterContent(chapId) {
+            synth.cancel();
+            fetch(`/chapter/${chapId}`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('chapterTitle').textContent = data.title;
+                    let container = document.getElementById('textContainer');
+                    container.innerHTML = '';
+                    currentParagraphs = data.paragraphs;
+                    currentIndex = 0;
+
+                    currentParagraphs.forEach((pText, i) => {
+                        let p = document.createElement('p');
+                        p.className = 'paragraph';
+                        p.id = `para-${i}`;
+                        p.textContent = pText;
+                        p.onclick = () => { currentIndex = i; speakCurrent(); };
+                        container.appendChild(p);
+                    });
+                });
+        }
+
+        function speakCurrent() {
+            synth.cancel();
+            if (currentIndex >= currentParagraphs.length) return;
+
+            // Highlight visual del párrafo actual
+            document.querySelectorAll('.paragraph').forEach(el => el.classList.remove('reading'));
+            let currentEl = document.getElementById(`para-${currentIndex}`);
+            if (currentEl) {
+                currentEl.classList.add('reading');
+                currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            utterance = new SpeechSynthesisUtterance(currentParagraphs[currentIndex]);
+            let voices = synth.getVoices();
+            let selectedVoice = document.getElementById('voiceSelect').value;
+            utterance.voice = voices.find(v => v.name === selectedVoice);
+            utterance.rate = parseFloat(document.getElementById('rate').value);
+
+            utterance.onend = () => {
+                currentIndex++;
+                speakCurrent();
+            };
+
+            synth.speak(utterance);
+        }
+
+        document.getElementById('btnPlay').onclick = () => speakCurrent();
+        document.getElementById('btnPause').onclick = () => synth.cancel();
+
+        // Cargar por primera vez
+        let initialBook = document.getElementById('bookSelect').value;
+        if (initialBook) loadChapters(initialBook);
+    </script>
+</body>
+</html>

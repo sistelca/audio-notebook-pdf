@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  audio-notebook:
+    build: .
+    container_name: audio_notebook_pdf
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./storage:/app/storage
+      - ./notebook.db:/app/notebook.db
+    restart: unless-stopped
+    
