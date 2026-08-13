@@ -8,6 +8,5 @@ services:
       - "8080:8080"
     volumes:
       - ./storage:/app/storage
-      - ./notebook.db:/app/notebook.db
+      - ./data:/app/data
     restart: unless-stopped
-    
