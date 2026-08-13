@@ -196,11 +196,21 @@
         function speakAIAnswer() {
             if (!lastAiAnswer) return;
             synth.cancel();
-            let utt = new SpeechSynthesisUtterance(lastAiAnswer);
+
+            // Limpieza de seguridad: elimina markdown o caracteres extraños si sobrevivieron
+            let cleanText = lastAiAnswer
+                .replace(/[\*\_~`#]/g, '')            // Elimina *, _, ~, `, #
+                .replace(/\|/g, ', ')                 // Reemplaza barras de tablas por comas
+                .replace(/<[^>]*>/g, '')              // Elimina etiquetas HTML si las hubiera
+                .replace(/\n+/g, '. ');              // Convierte saltos de línea en pausas/puntos
+
+            let utt = new SpeechSynthesisUtterance(cleanText);
             let voices = synth.getVoices();
             let selectedVoice = document.getElementById('voiceSelect').value;
+            
             utt.voice = voices.find(v => v.name === selectedVoice);
             utt.rate = parseFloat(document.getElementById('rate').value);
+
             synth.speak(utt);
         }
 
