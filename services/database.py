@@ -5,7 +5,7 @@ import json
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 DB_NAME = os.path.join(DATA_DIR, 'notebook.db')
-from utils.logger import get_logger
+from services.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

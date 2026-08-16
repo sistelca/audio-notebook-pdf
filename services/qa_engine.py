@@ -2,7 +2,7 @@ import os
 import re
 from google import genai
 from google.genai import types
-from utils.logger import get_logger
+from services.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

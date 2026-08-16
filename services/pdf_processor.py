@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 import pymupdf
 from pydantic import BaseModel, Field
-from utils.logger import get_logger
+from services.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
