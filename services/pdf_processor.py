@@ -9,6 +9,7 @@ import pymupdf
 from pydantic import BaseModel, Field
 from utils.logger import get_logger
 
+
 logger = get_logger(__name__)
 
 def es_pagina_candidata_indice(texto_pagina: str) -> bool:
