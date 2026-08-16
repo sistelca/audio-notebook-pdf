@@ -26,6 +26,31 @@
         .chat-input-area input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         button { padding: 8px 12px; font-size: 14px; cursor: pointer; background: #1abc9c; color: white; border: none; border-radius: 4px; }
         button:hover { background: #16a085; }
+
+        /* Estilos Banner y Spinner de Procesamiento de PDF */
+        #processing-banner {
+            display: none;
+            background: #e1f5fe;
+            border: 1px solid #81d4fa;
+            color: #0277bd;
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            align-items: center;
+            gap: 10px;
+        }
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 3px solid rgba(2, 119, 189, 0.2);
+            border-top-color: #0277bd;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -45,6 +70,12 @@
 
     <!-- Panel Central: Lectura en Voz Alta -->
     <div id="content">
+        <!-- Banner que muestra el reloj de carga al procesar nuevos PDFs -->
+        <div id="processing-banner">
+            <div class="spinner"></div>
+            <span><b>Analizando libros nuevos con IA...</b> Esto puede tomar unos instantes. Por favor espera.</span>
+        </div>
+
         <div class="controls">
             <button id="btnPlay">▶️ Leer Capítulo</button>
             <button id="btnPause">⏸️ Pausar</button>
@@ -77,7 +108,7 @@
     <script>
         let currentParagraphs = [];
         let currentIndex = 0;
-        let activeChapterId = null;
+        let bookchap_id = null;
         let lastAiAnswer = "";
         let synth = window.speechSynthesis;
         let utterance = null;
@@ -132,31 +163,32 @@
                     data.chapters.forEach(c => {
                         let div = document.createElement('div');
                         div.className = `chapter-item ${c.id === data.current_chapter_id ? 'active' : ''}`;
-                        div.textContent = `📖 [${c.number}] ${c.title}`;
+                        div.textContent = `📖 ${c.titulo}`;
+
                         div.onclick = () => {
                             document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('active'));
                             div.classList.add('active');
-                            loadChapterContent(c.id);
+                            loadChapterContent(bookId, c.id);
                         };
                         list.appendChild(div);
                     });
 
                     // Cargar el capítulo activo o el primero automáticamente
                     let targetId = data.current_chapter_id || (data.chapters[0] ? data.chapters[0].id : null);
-                    if (targetId) loadChapterContent(targetId);
+                    if (targetId) loadChapterContent(bookId, targetId);
                 })
                 .catch(err => console.error("Error al cargar capítulos:", err));
         }
 
-        function loadChapterContent(chapId) {
-            activeChapterId = chapId;
+        function loadChapterContent(bookId, chapId) {
+            bookchap_id = String(bookId) + '_' + String(chapId)
             synth.cancel();
             document.getElementById('chatBox').innerHTML = ''; // Limpiar chat al cambiar capítulo
 
-            fetch(`/chapter/${chapId}`)
+            fetch(`/chapter/${bookchap_id}`)
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('chapterTitle').textContent = data.title;
+                    document.getElementById('chapterTitle').textContent = data.titulo;
                     let container = document.getElementById('textContainer');
                     container.innerHTML = '';
                     currentParagraphs = data.paragraphs;
@@ -205,7 +237,7 @@
         function askAI() {
             let input = document.getElementById('questionInput');
             let q = input.value.trim();
-            if (!q || !activeChapterId) return;
+            if (!q || !bookchap_id) return;
 
             let chatBox = document.getElementById('chatBox');
             let btnRead = document.getElementById('btnReadAnswer');
@@ -221,7 +253,7 @@
             fetch('/ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chapter_id: activeChapterId, question: q })
+                body: JSON.stringify({ chapter_id: bookchap_id, question: q })
             })
             .then(r => r.json())
             .then(data => {
@@ -270,12 +302,34 @@
             synth.speak(utt);
         }
 
+        // --- PROCESAMIENTO ASÍNCRONO EN SEGUNDO PLANO ---
+        function checkAndProcessNewPDFs() {
+            let banner = document.getElementById('processing-banner');
+            banner.style.display = 'flex';
+
+            fetch('/api/process-books', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    banner.style.display = 'none';
+                    // Si se identificaron y procesaron nuevos PDFs, refrescar la página
+                    if (data.processed && data.processed > 0) {
+                        window.location.reload();
+                    }
+                })
+                .catch(err => {
+                    console.error("Error al procesar PDFs en background:", err);
+                    banner.style.display = 'none';
+                });
+        }
+
         // --- CARGA INICIAL AUTOMÁTICA AL ABRIR LA PÁGINA ---
         document.addEventListener('DOMContentLoaded', () => {
             let bookSelect = document.getElementById('bookSelect');
             if (bookSelect && bookSelect.value) {
                 loadChapters(bookSelect.value);
             }
+            // Disparar la verificación asíncrona de PDFs
+            checkAndProcessNewPDFs();
         });
     </script>
 </body>

@@ -2,6 +2,10 @@ import os
 import re
 from google import genai
 from google.genai import types
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ChapterQAEngine:
     def __init__(self):
@@ -42,7 +46,7 @@ class ChapterQAEngine:
 
         return text.strip()
 
-    def ask_chapter(self, chapter_title, chapter_text, question):
+    def ask_chapter(self, chapter_text, question):
         """Envía la pregunta a Gemini y retorna un texto adaptado para voz."""
         system_instruction = (
             "Eres un tutor académico en formato de audio. "
@@ -53,8 +57,6 @@ class ChapterQAEngine:
         )
 
         prompt = f"""
-                Capítulo: {chapter_title}
-
                 Contenido:
                 {chapter_text}
 

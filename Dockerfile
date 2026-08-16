@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 8080
 
 # Punto de entrada
-CMD ["gunicorn", "services.app:app", "-b", "0.0.0.0:8080"]
+CMD ["gunicorn", "services.app:app", "-b", "0.0.0.0:8080", "-t", "300"]

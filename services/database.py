@@ -1,10 +1,13 @@
 import sqlite3
 import os
+import json
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 DB_NAME = os.path.join(DATA_DIR, 'notebook.db')
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -14,20 +17,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS books (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT UNIQUE,
-            title TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS chapters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            book_id INTEGER,
-            chapter_number INTEGER,
             title TEXT,
-            start_page INTEGER,
-            end_page INTEGER,
-            content TEXT,
-            FOREIGN KEY(book_id) REFERENCES books(id)
+            structure TEXT CONSTRAINT json_valido CHECK (json_valid(structure))
         )
     ''')
 
@@ -35,9 +26,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS progress (
             book_id INTEGER PRIMARY KEY,
             current_chapter_id INTEGER,
+            chapter_content TEXT,
             current_paragraph INTEGER DEFAULT 0,
-            FOREIGN KEY(book_id) REFERENCES books(id),
-            FOREIGN KEY(current_chapter_id) REFERENCES chapters(id)
+            FOREIGN KEY(book_id) REFERENCES books(id)
         )
     ''')
 
@@ -49,27 +40,23 @@ def save_book_and_chapters(filename, chapters):
     cursor = conn.cursor()
     
     # Insertar o buscar libro
-    cursor.execute("INSERT OR IGNORE INTO books (filename, title) VALUES (?, ?)", (filename, filename))
+    cursor.execute("INSERT OR IGNORE INTO books (filename, title, structure) VALUES (?, ?)", (filename, filename, chapters))
     cursor.execute("SELECT id FROM books WHERE filename = ?", (filename,))
     book_id = cursor.fetchone()[0]
-
-    # LIMPIAR CAPÍTULOS VIEJOS del libro para evitar duplicados al recargar
-    cursor.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
-
-    # Insertar capítulos nuevos y limpios
-    for cap in chapters:
-        cursor.execute('''
-            INSERT INTO chapters 
-            (book_id, chapter_number, title, start_page, end_page, content)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (book_id, cap['chapter_number'], cap['title'], cap['start_page'], cap['end_page'], cap['text']))
-
-    # Inicializar progreso en el primer capítulo
-    cursor.execute("SELECT id FROM chapters WHERE book_id = ? ORDER BY chapter_number ASC LIMIT 1", (book_id,))
-    first_chap = cursor.fetchone()
-    if first_chap:
-        cursor.execute("INSERT OR IGNORE INTO progress (book_id, current_chapter_id) VALUES (?, ?)", (book_id, first_chap[0]))
 
     conn.commit()
     conn.close()
     return book_id
+
+def load_chapters(resultado, i=0):
+    chapters = []
+    try:
+        if resultado:
+            for elemento in json.loads(resultado[i]):
+                if elemento.get('nivel') in [0, 1, 2, 3]:
+                    chapters.append(elemento)
+
+    except Exception as e:
+        logger.exception(f"❌ load_chapters: {e}")
+
+    return chapters

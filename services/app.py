@@ -1,13 +1,16 @@
 import os
+import json
 import sqlite3
 from flask import Flask, render_template, jsonify, request
 from services.pdf_processor import PDFChapterExtractor
 from services.qa_engine import ChapterQAEngine
 import services.database as db
+from services.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORAGE_FOLDER = os.path.join(BASE_DIR, 'storage')
-
 
 app = Flask(
     __name__,
@@ -23,67 +26,103 @@ qa_engine = None
 try:
     qa_engine = ChapterQAEngine()
 except Exception as e:
-    print(f"⚠️ Advertencia QA Engine: {e}")
+    logger.exception(f"⚠️ Advertencia QA Engine: {e}")
 
 @app.route('/')
 def index():
-    pdf_files = [f for f in os.listdir(STORAGE_FOLDER) if f.endswith('.pdf')]
-    
+    """Carga la página de forma INSTANTÁNEA sin esperar a Gemini"""
     conn = sqlite3.connect(db.DB_NAME)
     cursor = conn.cursor()
-
-    for pdf in pdf_files:
-        # 1. Verificar si el libro ya está guardado en la BD
-        cursor.execute("SELECT id FROM books WHERE title = ?", (pdf,))
-        existing_book = cursor.fetchone()
-
-        # 2. Solo llamar a Gemini si el PDF es totalmente nuevo
-        if not existing_book:
-            path = os.path.join(STORAGE_FOLDER, pdf)
-            extractor = PDFChapterExtractor(path)
-            capitulos = extractor.get_chapters()
-            if capitulos:
-                db.save_book_and_chapters(pdf, capitulos)
-
     cursor.execute("SELECT id, title FROM books")
     books = cursor.fetchall()
     conn.close()
 
+    # Renders la vista en milisegundos
     return render_template('index.html', books=books)
+
+@app.route('/api/process-books', methods=['POST'])
+def process_books():
+    """
+    Endpoint invocado en segundo plano por el JavaScript.
+    Procesa únicamente los PDFs nuevos que no estén en SQLite.
+    """
+    pdf_files = [f for f in os.listdir(STORAGE_FOLDER) if f.endswith('.pdf')]
+    
+    conn = sqlite3.connect(db.DB_NAME)
+    cursor = conn.cursor()
+    
+    nuevos_procesados = 0
+
+    for pdf in pdf_files:
+        # Verificar si el PDF ya fue procesado antes
+        cursor.execute("SELECT id FROM books WHERE title = ?", (pdf,))
+        if not cursor.fetchone():
+            path = os.path.join(STORAGE_FOLDER, pdf)
+            try:
+                extractor = PDFChapterExtractor(path)
+                capitulos = extractor.get_chapters()
+                if capitulos:
+                    db.save_book_and_chapters(pdf, capitulos)
+                    nuevos_procesados += 1
+            except Exception as e:
+                logger.exception(f"⚠️ Error procesando {pdf}: {e}")
+
+    conn.close()
+    return jsonify({"status": "ok", "processed": nuevos_procesados})
 
 @app.route('/book/<int:book_id>/chapters')
 def get_chapters(book_id):
     conn = sqlite3.connect(db.DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, chapter_number, title, start_page, end_page FROM chapters WHERE book_id = ? ORDER BY chapter_number", (book_id,))
-    rows = cursor.fetchall()
+    cursor.execute("SELECT structure FROM books WHERE id = ?", (book_id,))
+    resultado = cursor.fetchone()
+
+    chapters = db.load_chapters(resultado)
     
     cursor.execute("SELECT current_chapter_id FROM progress WHERE book_id = ?", (book_id,))
     prog = cursor.fetchone()
-    current_chap_id = prog[0] if prog else (rows[0][0] if rows else None)
+
+    current_chap_id = prog[0] if prog else 0
     conn.close()
     
-    chapters = [{"id": r[0], "number": r[1], "title": r[2], "pages": f"{r[3]}-{r[4]}"} for r in rows]
     return jsonify({"chapters": chapters, "current_chapter_id": current_chap_id})
 
-@app.route('/chapter/<int:chapter_id>')
-def get_chapter_content(chapter_id):
+@app.route('/chapter/<str:bookchap_id>')
+def get_chapter_content(bookchap_id):
     conn = sqlite3.connect(db.DB_NAME)
+    book_id = int(bookchap_id.split('_')[0])
+    chapter_id = int(bookchap_id.split('_')[1])
+    chapter = None
+
     cursor = conn.cursor()
-    cursor.execute("SELECT id, book_id, title, content FROM chapters WHERE id = ?", (chapter_id,))
-    row = cursor.fetchone()
-    
-    if row:
-        cursor.execute("UPDATE progress SET current_chapter_id = ? WHERE book_id = ?", (chapter_id, row[1]))
+    cursor.execute("SELECT filename, structure FROM books WHERE id = ?", (book_id,))
+    resultado = cursor.fetchone()
+
+    if resultado:
+        pdf = resultado[0]
+        chapters = db.load_chapters(resultado, 1)
+
+        path = os.path.join(STORAGE_FOLDER, pdf)
+        extractor = PDFChapterExtractor(path)
+        chapter = extractor.get_chapter(chapters, chapter_id)
+        paragraphs = ' '.join(chapters['paragraphs'])
+
+    if chapter:
+        cursor.execute("""
+            INSERT INTO progress (book_id, current_chapter_id, chapter_content, current_paragraph)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(book_id) DO UPDATE SET
+                current_chapter_id = excluded.current_chapter_id,
+                chapter_content = excluded.chapter_content,
+                current_paragraph = excluded.current_paragraph
+        """, (book_id, chapter_id, paragraphs, chapter_id))
+
         conn.commit()
         conn.close()
         
-        paragraphs = [p.strip() for p in row[3].split('\n\n') if p.strip()]
-        return jsonify({
-            "id": row[0],
-            "title": row[2],
-            "paragraphs": paragraphs
-        })
+        return jsonify(
+            chapter
+        )
     conn.close()
     return jsonify({"error": "No encontrado"}), 404
 
@@ -93,7 +132,10 @@ def ask_question():
         return jsonify({"error": "El motor de IA no está configurado (GEMINI_API_KEY faltante)."}), 500
 
     data = request.json
-    chapter_id = data.get("chapter_id")
+    book_chapter_id = data.get("chapter_id")
+    book_id = int(book_chapter_id.split('_')[0])
+    chapter_id = int(book_chapter_id.split('_')[1])
+
     question = data.get("question")
 
     if not chapter_id or not question:
@@ -102,17 +144,17 @@ def ask_question():
     # Obtener el contenido completo del capítulo desde la BD
     conn = sqlite3.connect(db.DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM chapters WHERE id = ?", (chapter_id,))
+    cursor.execute("SELECT chapter_content FROM progress WHERE book_id = ?", (book_id,))
     row = cursor.fetchone()
     conn.close()
 
     if not row:
         return jsonify({"error": "Capítulo no encontrado."}), 404
 
-    chapter_title, chapter_text = row
+    chapter_text = row[0]
     
     try:
-        answer = qa_engine.ask_chapter(chapter_title, chapter_text, question)
+        answer = qa_engine.ask_chapter(chapter_text, question)
         return jsonify({"answer": answer})
     except Exception as e:
         return jsonify({"error": f"Error al procesar la respuesta: {str(e)}"}), 500
