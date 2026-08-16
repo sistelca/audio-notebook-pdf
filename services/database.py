@@ -40,7 +40,7 @@ def save_book_and_chapters(filename, chapters):
     cursor = conn.cursor()
     
     # Insertar o buscar libro
-    cursor.execute("INSERT OR IGNORE INTO books (filename, title, structure) VALUES (?, ?)", (filename, filename, chapters))
+    cursor.execute("INSERT OR IGNORE INTO books (filename, title, structure) VALUES (?, ?, ?)", (filename, filename, chapters))
     cursor.execute("SELECT id FROM books WHERE filename = ?", (filename,))
     book_id = cursor.fetchone()[0]
 
