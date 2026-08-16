@@ -194,6 +194,7 @@ class PDFChapterExtractor:
 
     def get_chapter(self, chapters, chapter_id):
         pos, chapter = next((i, ch) for i, ch in enumerate(chapters) if ch['id']==chapter_id)
+        sub_doc = ''
 
         try:
             realpag_in, pagtxt = next(
@@ -209,7 +210,7 @@ class PDFChapterExtractor:
                 realpag_fn , pagfntxt = next(
                     (
                         (i, x.get_text("text")) for i, x in enumerate(self.doc) if (next_chapter.get('titulo') in x.get_text("text") and 
-                                                            not es_pagina_candidata_indice(x.get_text("text")))
+                                                            i >= realpag_in)
                     ), None
                 )            
                 pagfntxt = [pagfntxt[:pagfntxt.find(next_chapter['titulo'])]]
