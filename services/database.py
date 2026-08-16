@@ -53,8 +53,8 @@ def load_chapters(resultado, i=0):
     try:
         if resultado:
             for elemento in json.loads(resultado[i]):
-                if elemento.get('nivel') in [0, 1, 2, 3]:
-                    chapters.append(elemento)
+                #if elemento.get('nivel') in [0, 1, 2, 3]:
+                chapters.append(elemento)
 
     except Exception as e:
         logger.exception(f"❌ load_chapters: {e}")
