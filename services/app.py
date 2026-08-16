@@ -106,7 +106,7 @@ def get_chapter_content(bookchap_id):
         path = os.path.join(STORAGE_FOLDER, pdf)
         extractor = PDFChapterExtractor(path)
         chapter = extractor.get_chapter(chapters, chapter_id)
-        paragraphs = ' '.join(chapters['paragraphs'])
+        paragraphs = ' '.join(chapter['paragraphs'])
 
     if chapter:
         cursor.execute("""
