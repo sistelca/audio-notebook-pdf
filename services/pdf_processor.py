@@ -91,7 +91,8 @@ class PDFChapterExtractor:
         if not esqueleto or not esqueleto.texto_extraido_indice:
             return IndiceEstructurado(elementos=[])
 
-        prompt = f"a partir de esta cadena de texto, genera una tabla de indices pero como json: {esqueleto.texto_extraido_indice}"
+        prompt = f"""a partir de esta cadena de texto, genera una tabla de indices pero como json, identifica nivel solo 
+                    con numeros enteros comenzando desde 0: {esqueleto.texto_extraido_indice}"""
 
         try:
             # 4. Llamada ultrarrápida a Gemini
