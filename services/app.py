@@ -87,8 +87,9 @@ def get_chapters(book_id):
     
     return jsonify({"chapters": chapters, "current_chapter_id": current_chap_id})
 
-@app.route('/chapter/<str:bookchap_id>')
+@app.route('/chapter/<bookchap_id>')
 def get_chapter_content(bookchap_id):
+
     conn = sqlite3.connect(db.DB_NAME)
     book_id = int(bookchap_id.split('_')[0])
     chapter_id = int(bookchap_id.split('_')[1])
