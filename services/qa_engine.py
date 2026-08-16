@@ -75,4 +75,3 @@ class ChapterQAEngine:
 
         # Aplicar la limpieza estricta en el servidor
         return self._clean_markdown_for_speech(response.text)
-    
